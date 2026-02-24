@@ -88,60 +88,60 @@ async function run() {
     await page.getByText('Today', { exact: true }).click().catch(() => {});
     await page.waitForTimeout(1200);
 
-    // 4) Click the top-right download icon button (matches your button snippet)
-    console.log("Opening download menu...");
+    // 4) Open the download drawer
+console.log("Opening download menu...");
 
-    // On this page, the download icon is a button in the header/top-right.
-    // We'll target the LAST button in the header area as a pragmatic approach,
-    // then verify the download preferences dialog appears.
-    // If this fails, fallback to coordinate click.
-    const topRightDownloadBtn = page.locator('button[type="button"]').last();
+// Dismiss cookie banner if it appears (it can overlay the drawer)
+const cookieBtn2 = page.getByRole('button', { name: /I understand/i });
+if (await cookieBtn2.isVisible().catch(() => false)) {
+  console.log("Dismissing cookie notice (again)...");
+  await cookieBtn2.click().catch(() => {});
+}
 
-    let opened = false;
-    try {
-      await topRightDownloadBtn.click({ timeout: 5000 });
-      opened = true;
-    } catch {
-      opened = false;
-    }
+// Click the download icon button (top-right)
+// Prefer: click a button that contains the MaterialIcons glyph (not super reliable),
+// so we fallback to "last button in the header area" or coordinate click.
+let openedDrawer = false;
 
-    if (!opened) {
-      console.log("Falling back to coordinate click for download icon...");
-      await page.mouse.click(1235, 78);
-    }
+try {
+  // This clicks the icon button in the top bar area (often the last button near the header)
+  await page.locator('button[type="button"]').last().click({ timeout: 5000 });
+  openedDrawer = true;
+} catch {
+  openedDrawer = false;
+}
 
-    // 5) In the "Download preferences" dialog, click Excel and trigger download
-    // Your DOM shows a "Download preferences" heading and an "Excel" option button.
-    console.log("Selecting Excel option...");
-    await page.waitForSelector('text=Download preferences', { timeout: 30000 });
+if (!openedDrawer) {
+  console.log("Falling back to coordinate click for download icon...");
+  await page.mouse.click(1235, 78);
+}
 
-    const excelBtn = page.locator('button:has-text("Excel")').first();
-    await excelBtn.click({ timeout: 15000 });
+// Wait for drawer title instead of "Download preferences"
+console.log("Waiting for download drawer...");
+await page.waitForSelector('text=Download product report', { timeout: 60000 });
 
-    // The actual download might trigger immediately after selecting Excel,
-    // OR it might require another click (e.g., "Download" confirm).
-    // We'll wait briefly; if no download starts, click the top-right icon again.
-    console.log("Waiting for XLSX download to start...");
+// 5) Choose Excel, then click Download to trigger file download
+console.log("Selecting Excel...");
+await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
+  // fallback: click the Excel row by text
+  await page.locator('text=Excel').first().click({ timeout: 15000 });
+});
 
-    let download;
-    try {
-      download = await page.waitForEvent('download', { timeout: 15000 });
-    } catch {
-      // Some UIs require clicking the download icon again after setting preference
-      console.log("No download yet; clicking download icon again...");
-      // Try to click download icon again and wait for event
-      await Promise.all([
-        page.waitForEvent('download', { timeout: 30000 }).then(d => { download = d; }),
-        topRightDownloadBtn.click({ timeout: 5000 }).catch(async () => {
-          await page.mouse.click(1235, 78);
-        }),
-      ]);
-    }
+// Now click the Download button in the drawer and wait for download event
+console.log("Clicking Download...");
+const [download] = await Promise.all([
+  page.waitForEvent('download', { timeout: 60000 }),
+  page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
+    .catch(async () => {
+      // fallback: click by text if role lookup fails
+      await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
+    })
+]);
 
-    const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
-    await download.saveAs(downloadPath);
+const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
+await download.saveAs(downloadPath);
 
-    console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
+console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
 
   } catch (error) {
     console.error("❌ Error during Playwright execution:");
