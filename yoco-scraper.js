@@ -88,37 +88,34 @@ async function run() {
     await page.getByText('Today', { exact: true }).click().catch(() => {});
     await page.waitForTimeout(1200);
 
-    // 4) Open the download drawer
-console.log("Opening download menu...");
+    console.log("Opening download menu...");
 
-// Dismiss cookie banner if it appears (it can overlay the drawer)
+// dismiss cookie banner if present
 const cookieBtn2 = page.getByRole('button', { name: /I understand/i });
 if (await cookieBtn2.isVisible().catch(() => false)) {
   console.log("Dismissing cookie notice (again)...");
   await cookieBtn2.click().catch(() => {});
 }
 
-// Click the download icon button (top-right)
-// Prefer: click a button that contains the MaterialIcons glyph (not super reliable),
-// so we fallback to "last button in the header area" or coordinate click.
-let openedDrawer = false;
+// CLICK THE ACTUAL DOWNLOAD ICON BUTTON by its MaterialIcons glyph ""
+const downloadIconBtn = page.locator('button:has(div[style*="font-family: MaterialIcons"]):has-text("")').first();
 
-try {
-  // This clicks the icon button in the top bar area (often the last button near the header)
-  await page.locator('button[type="button"]').last().click({ timeout: 5000 });
-  openedDrawer = true;
-} catch {
-  openedDrawer = false;
+if (await downloadIconBtn.count() === 0) {
+  throw new Error('Could not find the download icon button (). Selector may need adjustment.');
 }
 
-if (!openedDrawer) {
-  console.log("Falling back to coordinate click for download icon...");
-  await page.mouse.click(1235, 78);
-}
+await downloadIconBtn.click({ timeout: 15000, force: true });
 
-// Wait for drawer title instead of "Download preferences"
+// Wait for *any* sign the drawer opened
 console.log("Waiting for download drawer...");
-await page.waitForSelector('text=Download product report', { timeout: 60000 });
+await page.waitForFunction(() => {
+  const bodyText = document.body?.innerText || "";
+  return (
+    bodyText.includes("Download product report") ||
+    bodyText.includes("Download preferences") ||
+    (bodyText.includes("Excel") && bodyText.includes("CSV"))
+  );
+}, null, { timeout: 60000 });
 
 // 5) Choose Excel, then click Download to trigger file download
 console.log("Selecting Excel...");
