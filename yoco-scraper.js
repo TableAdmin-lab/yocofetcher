@@ -13,7 +13,6 @@ async function run() {
   console.log(`Starting YOCO products sync for: ${email}`);
 
   const browser = await chromium.launch({ headless: true });
-
   const context = await browser.newContext({
     acceptDownloads: true,
     viewport: { width: 1280, height: 720 },
@@ -26,7 +25,7 @@ async function run() {
     console.log("Navigating to login page...");
     await page.goto('https://app.yoco.com/login/existing', { waitUntil: 'domcontentloaded' });
 
-    // Cookie banner can block interactions
+    // Dismiss cookie banner if it blocks input/clicks
     const cookieBtn = page.getByRole('button', { name: /I understand/i });
     if (await cookieBtn.isVisible().catch(() => false)) {
       console.log("Dismissing cookie notice...");
@@ -44,89 +43,106 @@ async function run() {
     await emailInput.fill(email);
     await passInput.fill(password);
 
-    // IMPORTANT:
-    // Your HTML shows "Log in" is inside a DIV with aria-disabled, not a button.
-    // It may stay aria-disabled="true" but still become clickable via styles.
-    // So instead of waiting for aria-disabled=false, we:
-    // - locate the element containing "Log in"
-    // - wait for it to exist/visible
-    // - click it
-    // - if it fails due to overlay/disabled, press Enter in password field as fallback.
+    // The login "button" is a DIV with aria-disabled, not a normal <button>
+    // We'll locate the aria-disabled container that CONTAINS the "Log in" text.
+    const loginContainer = page.locator('[aria-disabled]:has-text("Log in")').first();
+
+    // Wait for it to exist/visible
+    await loginContainer.waitFor({ state: 'visible', timeout: 60000 });
+
+    // Give the app a moment to validate and enable the control
+    // Then click it (force helps if it's a div with overlay-ish behavior)
     console.log("Submitting login...");
+    await page.waitForTimeout(500);
 
-    const loginControl = page.locator('div:has-text("Log in")').first();
-    await loginControl.waitFor({ state: 'visible', timeout: 60000 });
+    // Try clicking; if it doesn't navigate, try Enter as fallback
+    await loginContainer.click({ force: true, timeout: 10000 }).catch(() => {});
 
-    // Try clicking the closest clickable parent (the aria-disabled container)
-    const loginContainer = loginControl.locator('xpath=ancestor-or-self::*[@aria-disabled][1]');
-    if (await loginContainer.count()) {
-      await loginContainer.click({ timeout: 10000, force: true });
-    } else {
-      // Fallback: click the text node container
-      await loginControl.click({ timeout: 10000, force: true });
-    }
-
-    // Fallback: if still on login page after short wait, press Enter in password field
-    await page.waitForTimeout(1500);
+    // If still on login, try pressing Enter in password field
+    await page.waitForTimeout(1000);
     if (page.url().includes('/login/')) {
       console.log("Login click may not have submitted; pressing Enter in password field...");
       await passInput.press('Enter').catch(() => {});
     }
 
-    // Wait for navigation/app state change
-    await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
+    // Wait until we are NOT on a login URL anymore (auth completed)
+    console.log("Waiting for login redirect...");
+    await page.waitForFunction(() => !location.pathname.includes('/login'), null, { timeout: 60000 })
+      .catch(() => {});
 
-    // 2) Navigate to Products report page
+    // 2) Navigate directly to products report (today)
     console.log("Navigating to products report...");
-    await page.goto('https://app.yoco.com/reports/products/home', { waitUntil: 'domcontentloaded' });
+    await page.goto('https://app.yoco.com/reports/products/home?period=today', { waitUntil: 'domcontentloaded' });
 
-    // Ensure we're actually on the report (auth succeeded)
-    await page.waitForSelector('text=Products report', { timeout: 60000 });
-
-    // 3) Ensure "Today" is selected
-    console.log('Selecting "Today" filter...');
-    await page.getByText('Today', { exact: true }).click().catch(() => {});
-    await page.waitForTimeout(1500);
-
-    // 4) Click download icon (top right) and choose XLSX
-    console.log("Opening download menu...");
-
-    const downloadCandidates = [
-      'button[aria-label*="download" i]',
-      'button[title*="download" i]',
-      '[role="button"][aria-label*="download" i]',
-      'a[aria-label*="download" i]',
-    ];
-
-    let openedMenu = false;
-    for (const sel of downloadCandidates) {
-      const loc = page.locator(sel).first();
-      if (await loc.count()) {
-        try {
-          await loc.click({ timeout: 3000 });
-          openedMenu = true;
-          break;
-        } catch {}
-      }
+    // If we got bounced back to login, fail with a clearer message
+    if (page.url().includes('/login')) {
+      throw new Error(`Not authenticated (redirected back to login). Current URL: ${page.url()}`);
     }
 
-    if (!openedMenu) {
+    // Instead of relying on "Products report" text (could vary),
+    // wait for something stable on the report page: the "Today" pill and the tabs row.
+    await page.waitForSelector('text=Today', { timeout: 60000 });
+
+    // 3) Ensure Today is selected (safe no-op if already selected)
+    console.log('Ensuring "Today" filter...');
+    await page.getByText('Today', { exact: true }).click().catch(() => {});
+    await page.waitForTimeout(1200);
+
+    // 4) Click the top-right download icon button (matches your button snippet)
+    console.log("Opening download menu...");
+
+    // On this page, the download icon is a button in the header/top-right.
+    // We'll target the LAST button in the header area as a pragmatic approach,
+    // then verify the download preferences dialog appears.
+    // If this fails, fallback to coordinate click.
+    const topRightDownloadBtn = page.locator('button[type="button"]').last();
+
+    let opened = false;
+    try {
+      await topRightDownloadBtn.click({ timeout: 5000 });
+      opened = true;
+    } catch {
+      opened = false;
+    }
+
+    if (!opened) {
       console.log("Falling back to coordinate click for download icon...");
       await page.mouse.click(1235, 78);
     }
 
-    // 5) Pick XLSX option and download
-    console.log("Selecting XLSX and downloading...");
+    // 5) In the "Download preferences" dialog, click Excel and trigger download
+    // Your DOM shows a "Download preferences" heading and an "Excel" option button.
+    console.log("Selecting Excel option...");
+    await page.waitForSelector('text=Download preferences', { timeout: 30000 });
 
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 60000 }),
-      page.locator('text=/\\bXLSX\\b/i, text=/\\bExcel\\b/i').first().click({ timeout: 30000 }),
-    ]);
+    const excelBtn = page.locator('button:has-text("Excel")').first();
+    await excelBtn.click({ timeout: 15000 });
+
+    // The actual download might trigger immediately after selecting Excel,
+    // OR it might require another click (e.g., "Download" confirm).
+    // We'll wait briefly; if no download starts, click the top-right icon again.
+    console.log("Waiting for XLSX download to start...");
+
+    let download;
+    try {
+      download = await page.waitForEvent('download', { timeout: 15000 });
+    } catch {
+      // Some UIs require clicking the download icon again after setting preference
+      console.log("No download yet; clicking download icon again...");
+      // Try to click download icon again and wait for event
+      await Promise.all([
+        page.waitForEvent('download', { timeout: 30000 }).then(d => { download = d; }),
+        topRightDownloadBtn.click({ timeout: 5000 }).catch(async () => {
+          await page.mouse.click(1235, 78);
+        }),
+      ]);
+    }
 
     const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
     await download.saveAs(downloadPath);
 
     console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
+
   } catch (error) {
     console.error("❌ Error during Playwright execution:");
     console.error(error);
