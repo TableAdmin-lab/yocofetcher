@@ -1,0 +1,14 @@
+{
+  "name": "yoco-pos-reports-grabber",
+  "version": "1.0.0",
+  "description": "YOCO Sales Sync Engine",
+  "main": "yoco-scraper.js",
+  "scripts": {
+    "start": "node yoco-scraper.js"
+  },
+  "dependencies": {
+    "playwright": "^1.41.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
