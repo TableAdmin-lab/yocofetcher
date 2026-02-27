@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     # Wait time eliminated by using official playright container
     container:
-      image: mcr.microsoft.com/playwright:v1.41.0-jammy
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
     permissions:
       contents: write # Needed to commit the CSV back to the repo
       
