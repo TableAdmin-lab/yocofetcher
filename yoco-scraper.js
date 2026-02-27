@@ -10,7 +10,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log(`Starting YOCO products sync for: ${email}`);
+  console.log(`[Yoco Sync Engine] Starting sync for: ${email}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -29,7 +29,7 @@ async function run() {
     const cookieBtn = page.getByRole('button', { name: /I understand/i });
     if (await cookieBtn.isVisible().catch(() => false)) {
       console.log("Dismissing cookie notice...");
-      await cookieBtn.click().catch(() => {});
+      await cookieBtn.click().catch(() => { });
     }
 
     const emailInput = page.locator('input[placeholder="Enter your email address"]');
@@ -56,19 +56,19 @@ async function run() {
     await page.waitForTimeout(500);
 
     // Try clicking; if it doesn't navigate, try Enter as fallback
-    await loginContainer.click({ force: true, timeout: 10000 }).catch(() => {});
+    await loginContainer.click({ force: true, timeout: 10000 }).catch(() => { });
 
     // If still on login, try pressing Enter in password field
     await page.waitForTimeout(1000);
     if (page.url().includes('/login/')) {
       console.log("Login click may not have submitted; pressing Enter in password field...");
-      await passInput.press('Enter').catch(() => {});
+      await passInput.press('Enter').catch(() => { });
     }
 
     // Wait until we are NOT on a login URL anymore (auth completed)
     console.log("Waiting for login redirect...");
     await page.waitForFunction(() => !location.pathname.includes('/login'), null, { timeout: 60000 })
-      .catch(() => {});
+      .catch(() => { });
 
     // 2) Navigate directly to products report (today)
     console.log("Navigating to products report...");
@@ -85,63 +85,63 @@ async function run() {
 
     // 3) Ensure Today is selected (safe no-op if already selected)
     console.log('Ensuring "Today" filter...');
-    await page.getByText('Today', { exact: true }).click().catch(() => {});
+    await page.getByText('Today', { exact: true }).click().catch(() => { });
     await page.waitForTimeout(1200);
 
     console.log("Opening download menu...");
 
-// dismiss cookie banner if present
-const cookieBtn2 = page.getByRole('button', { name: /I understand/i });
-if (await cookieBtn2.isVisible().catch(() => false)) {
-  console.log("Dismissing cookie notice (again)...");
-  await cookieBtn2.click().catch(() => {});
-}
+    // dismiss cookie banner if present
+    const cookieBtn2 = page.getByRole('button', { name: /I understand/i });
+    if (await cookieBtn2.isVisible().catch(() => false)) {
+      console.log("Dismissing cookie notice (again)...");
+      await cookieBtn2.click().catch(() => { });
+    }
 
-// CLICK THE ACTUAL DOWNLOAD ICON BUTTON by its MaterialIcons glyph ""
-const downloadIconBtn = page.locator('button:has(div[style*="font-family: MaterialIcons"]):has-text("")').first();
+    // CLICK THE ACTUAL DOWNLOAD ICON BUTTON by its MaterialIcons glyph ""
+    const downloadIconBtn = page.locator('button:has(div[style*="font-family: MaterialIcons"]):has-text("")').first();
 
-if (await downloadIconBtn.count() === 0) {
-  throw new Error('Could not find the download icon button (). Selector may need adjustment.');
-}
+    if (await downloadIconBtn.count() === 0) {
+      throw new Error('Could not find the download icon button (). Selector may need adjustment.');
+    }
 
-await downloadIconBtn.click({ timeout: 15000, force: true });
+    await downloadIconBtn.click({ timeout: 15000, force: true });
 
-// Wait for *any* sign the drawer opened
-console.log("Waiting for download drawer...");
-await page.waitForFunction(() => {
-  const bodyText = document.body?.innerText || "";
-  return (
-    bodyText.includes("Download product report") ||
-    bodyText.includes("Download preferences") ||
-    (bodyText.includes("Excel") && bodyText.includes("CSV"))
-  );
-}, null, { timeout: 60000 });
+    // Wait for *any* sign the drawer opened
+    console.log("Waiting for download drawer...");
+    await page.waitForFunction(() => {
+      const bodyText = document.body?.innerText || "";
+      return (
+        bodyText.includes("Download product report") ||
+        bodyText.includes("Download preferences") ||
+        (bodyText.includes("Excel") && bodyText.includes("CSV"))
+      );
+    }, null, { timeout: 60000 });
 
-// 5) Choose Excel, then click Download to trigger file download
-console.log("Selecting Excel...");
-await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
-  // fallback: click the Excel row by text
-  await page.locator('text=Excel').first().click({ timeout: 15000 });
-});
+    // 5) Choose Excel, then click Download to trigger file download
+    console.log("Selecting Excel...");
+    await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
+      // fallback: click the Excel row by text
+      await page.locator('text=Excel').first().click({ timeout: 15000 });
+    });
 
-// Now click the Download button in the drawer and wait for download event
-console.log("Clicking Download...");
-const [download] = await Promise.all([
-  page.waitForEvent('download', { timeout: 60000 }),
-  page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
-    .catch(async () => {
-      // fallback: click by text if role lookup fails
-      await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
-    })
-]);
+    // Now click the Download button in the drawer and wait for download event
+    console.log("Clicking Download...");
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 60000 }),
+      page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
+        .catch(async () => {
+          // fallback: click by text if role lookup fails
+          await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
+        })
+    ]);
 
-const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
-await download.saveAs(downloadPath);
+    const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
+    await download.saveAs(downloadPath);
 
-console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
+    console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
 
   } catch (error) {
-    console.error("❌ Error during Playwright execution:");
+    console.error("❌ Synchronization failed. Please check credentials or try again later.");
     console.error(error);
     process.exit(1);
   } finally {
