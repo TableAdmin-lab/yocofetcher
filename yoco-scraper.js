@@ -146,7 +146,8 @@ async function run() {
 
     // Click Export button
     console.log("Opening catalog export menu...");
-    const exportBtn = page.locator('button:has-text("Export")').first();
+    // The previous selector hit a potentially hidden mobile nav button. This finds the specific visible Export button block
+    const exportBtn = page.getByRole('button', { name: 'Export', exact: true }).and(page.locator(':visible')).first();
     await exportBtn.waitFor({ state: 'visible', timeout: 30000 });
     await exportBtn.click({ timeout: 15000, force: true });
 
