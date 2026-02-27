@@ -145,11 +145,18 @@ async function run() {
     await page.goto('https://app.yoco.com/manage/products/home', { waitUntil: 'domcontentloaded' });
 
     // Click Export button
+    // Click Export button
     console.log("Opening catalog export menu...");
-    // The previous selector hit a potentially hidden mobile nav button. This finds the specific visible Export button block
-    const exportBtn = page.getByRole('button', { name: 'Export', exact: true }).and(page.locator(':visible')).first();
-    await exportBtn.waitFor({ state: 'visible', timeout: 30000 });
-    await exportBtn.click({ timeout: 15000, force: true });
+    const exportBtn = page.locator('button:has-text("Export")').last();
+    await exportBtn.waitFor({ state: 'attached', timeout: 30000 });
+    await exportBtn.click({ timeout: 15000, force: true }).catch(async () => {
+      console.log("Fallback to evaluate click for Export button...");
+      await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const target = btns.find(b => b.innerText && b.innerText.includes('Export'));
+        if (target) target.click();
+      });
+    });
 
     // Wait for the drawer
     console.log("Waiting for catalog download drawer...");
