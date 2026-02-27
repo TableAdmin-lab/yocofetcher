@@ -15,7 +15,7 @@ on:
 jobs:
   fetch-report:
     runs-on: ubuntu-latest
-    # Wait time eliminated by using official playright container
+    # Wait time eliminated by using official playwright container
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     permissions:
@@ -29,7 +29,7 @@ jobs:
 
       - name: Setup Node Modules Cache
         id: cache-node-modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4 # Upgraded to v4
         with:
           path: node_modules
           key: ${{ runner.os }}-node-modules-${{ hashFiles('package.json') }}
@@ -53,3 +53,12 @@ jobs:
           # Only commit if there are changes
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-sync: Latest YOCO Sales and Catalog Reports"
           git push || echo "No changes to push"
+
+      # CRITICAL ADDITION: Save the screenshot if the scraper fails
+      - name: Upload Debug Screenshot
+        if: failure() # Only runs if a previous step failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-screenshot
+          path: error_screenshot.png
+          retention-days: 3 # Keeps your storage clean
