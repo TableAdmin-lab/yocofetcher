@@ -147,36 +147,40 @@ async function run() {
     // Click Export button
     // Click Export button
     console.log("Opening catalog export menu...");
-    const exportBtn = page.locator('button:has-text("Export")').last();
-    await exportBtn.waitFor({ state: 'attached', timeout: 30000 });
-    await exportBtn.click({ timeout: 15000, force: true }).catch(async () => {
-      console.log("Fallback to evaluate click for Export button...");
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const target = btns.find(b => b.innerText && b.innerText.includes('Export'));
-        if (target) target.click();
-      });
+    await page.waitForTimeout(1500); // Let the page fully render
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button, div'));
+      // Find a button or div that contains "Export" exactly or is the export container
+      const target = btns.find(b => b.innerText && b.innerText.trim() === 'Export');
+      if (target) target.click();
     });
 
     // Wait for the drawer
     console.log("Waiting for catalog download drawer...");
-    await page.waitForFunction(() => {
-      const bodyText = document.body?.innerText || "";
-      return bodyText.includes("Excel");
-    }, null, { timeout: 60000 });
+    await page.waitForTimeout(3000); // Give drawer time to animate in
 
-    console.log("Selecting Excel for catalog...");
-    await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
-      await page.locator('text=Excel').first().click({ timeout: 15000 });
-    });
-
-    console.log("Clicking Download for catalog...");
+    console.log("Selecting Excel for catalog and clicking Download...");
     const [download2] = await Promise.all([
       page.waitForEvent('download', { timeout: 60000 }),
-      page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
-        .catch(async () => {
-          await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
-        })
+      page.evaluate(() => {
+        // 1. Find and click "Excel"
+        const els = Array.from(document.querySelectorAll('button, div, span'));
+        const excelBtn = els.find(e => e.innerText && e.innerText.match(/Excel/i) && e.children.length === 0);
+        if (excelBtn) {
+          excelBtn.click();
+        } else {
+          // fallback parent click
+          const parentDiv = els.find(e => e.innerText && e.innerText.match(/Excel/i) && e.onclick);
+          if (parentDiv) parentDiv.click();
+        }
+
+        // 2. Click "Download" immediately after
+        setTimeout(() => {
+          const downs = Array.from(document.querySelectorAll('button, div'));
+          const downloadBtn = downs.reverse().find(e => e.innerText && e.innerText.trim() === 'Download');
+          if (downloadBtn) downloadBtn.click();
+        }, 800);
+      })
     ]);
 
     const downloadPath2 = path.join(__dirname, 'latest_yoco_catalog.xlsx');
