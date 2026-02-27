@@ -25,7 +25,6 @@ async function run() {
     console.log("Navigating to login page...");
     await page.goto('https://app.yoco.com/login/existing', { waitUntil: 'domcontentloaded' });
 
-    // Dismiss cookie banner if it blocks input/clicks
     const cookieBtn = page.getByRole('button', { name: /I understand/i });
     if (await cookieBtn.isVisible().catch(() => false)) {
       console.log("Dismissing cookie notice...");
@@ -122,39 +121,38 @@ async function run() {
 
     console.log(`✅ Successfully downloaded YOCO sales XLSX to: ${downloadPath}`);
 
-    // --- SECOND EXPORT: PRODUCTS CATALOG (FIXED) ---
+    // --- SECOND EXPORT: PRODUCTS CATALOG ---
     console.log("Navigating to products catalog...");
     await page.goto('https://app.yoco.com/manage/products/home', { waitUntil: 'domcontentloaded' });
 
     console.log("Opening catalog export menu...");
-    await page.waitForTimeout(1500); 
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button, div'));
-      const target = btns.find(b => b.innerText && b.innerText.trim() === 'Export');
-      if (target) target.click();
-    });
+    await page.waitForTimeout(2000); 
+    
+    // Step 1: Open the drawer using the first "Export" button
+    const openDrawerBtn = page.locator('button:has-text("Export"), div[role="button"]:has-text("Export")').first();
+    await openDrawerBtn.click({ force: true, timeout: 15000 });
 
     console.log("Waiting for catalog download drawer...");
     await page.waitForTimeout(3000); 
 
     console.log("Selecting Excel for catalog...");
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const target = btns.find(b => b.textContent && b.textContent.includes('Excel'));
-      if (target) target.click();
+    // Step 2: Click the Excel option inside the drawer
+    const excelCatalogBtn = page.locator('button:has-text("Excel"), div[role="button"]:has-text("Excel")').last();
+    await excelCatalogBtn.click({ force: true, timeout: 15000 }).catch(async () => {
+         await page.locator('text=Excel').last().click({ force: true, timeout: 15000 });
     });
 
-    // 🛑 CRITICAL FIX: Give the app time to process the "Excel" selection before hitting download
+    // 🛑 CRITICAL FIX: Give the app time to process the "Excel" selection
     await page.waitForTimeout(2500);
 
-    console.log("Clicking Download...");
+    console.log("Clicking final Export/Download button...");
+    // Step 3: Trigger the actual file generation. Based on your HTML, this is called "Export". 
+    // We use .last() because it will target the button inside the active drawer overlay.
+    const finalTriggerBtn = page.locator('button:has-text("Export"), button:has-text("Download")').last();
+
     const [download2] = await Promise.all([
       page.waitForEvent('download', { timeout: 60000 }),
-      page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const target = btns.reverse().find(b => b.textContent && b.textContent.trim() === 'Download');
-        if (target) target.click();
-      })
+      finalTriggerBtn.click({ force: true, timeout: 15000 })
     ]);
 
     const downloadPath2 = path.join(__dirname, 'latest_yoco_catalog.xlsx');
