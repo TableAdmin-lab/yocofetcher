@@ -160,26 +160,25 @@ async function run() {
     await page.waitForTimeout(3000); // Give drawer time to animate in
 
     console.log("Selecting Excel for catalog and clicking Download...");
+
+    // 1. Force Click the "Excel" button
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const target = btns.find(b => b.textContent && b.textContent.includes('Excel'));
+      if (target) target.click();
+    });
+
+    // Wait a brief moment to ensure the "Download" button processes the format change
+    await page.waitForTimeout(1000);
+
+    // 2. Click "Download" and await the event
     const [download2] = await Promise.all([
       page.waitForEvent('download', { timeout: 60000 }),
       page.evaluate(() => {
-        // 1. Find and click "Excel"
-        const els = Array.from(document.querySelectorAll('button, div, span'));
-        const excelBtn = els.find(e => e.innerText && e.innerText.match(/Excel/i) && e.children.length === 0);
-        if (excelBtn) {
-          excelBtn.click();
-        } else {
-          // fallback parent click
-          const parentDiv = els.find(e => e.innerText && e.innerText.match(/Excel/i) && e.onclick);
-          if (parentDiv) parentDiv.click();
-        }
-
-        // 2. Click "Download" immediately after
-        setTimeout(() => {
-          const downs = Array.from(document.querySelectorAll('button, div'));
-          const downloadBtn = downs.reverse().find(e => e.innerText && e.innerText.trim() === 'Download');
-          if (downloadBtn) downloadBtn.click();
-        }, 800);
+        const btns = Array.from(document.querySelectorAll('button'));
+        // Get the Download button. Typically it's the only one containing 'Download', but we'll reverse just in case it's at the end.
+        const target = btns.reverse().find(b => b.textContent && b.textContent.trim() === 'Download');
+        if (target) target.click();
       })
     ]);
 
