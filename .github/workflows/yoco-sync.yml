@@ -15,6 +15,9 @@ on:
 jobs:
   fetch-report:
     runs-on: ubuntu-latest
+    # Wait time eliminated by using official playright container
+    container:
+      image: mcr.microsoft.com/playwright:v1.41.0-jammy
     permissions:
       contents: write # Needed to commit the CSV back to the repo
       
@@ -22,24 +25,22 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Node Caching
+        uses: actions/cache@v3
         with:
-          node-version: '20'
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install Dependencies
-        run: |
-          npm init -y
-          npm install playwright
+        run: npm install
 
-      - name: Install Playwright Browsers
-        run: npx playwright install chromium --with-deps
-
-      - name: Run Playwright Scraper
+      - name: Run Yoco Sync Engine
         env:
           YOCO_EMAIL: ${{ github.event.inputs.yoco_email }}
           YOCO_PASSWORD: ${{ github.event.inputs.yoco_password }}
-        run: node yoco-scraper.js
+        run: npm start
 
       - name: Commit and Push XLSX
         run: |
@@ -48,4 +49,4 @@ jobs:
           git add latest_yoco_products.xlsx
           # Only commit if there are changes
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-sync: Latest YOCO Products Report"
-          git push
+          git push || echo "No changes to push"
