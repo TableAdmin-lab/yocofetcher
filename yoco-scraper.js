@@ -126,43 +126,30 @@ async function run() {
     await page.goto('https://app.yoco.com/manage/products/home', { waitUntil: 'domcontentloaded' });
 
     console.log("Opening catalog export menu...");
-    await page.waitForTimeout(1500);
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button, div'));
-      const target = btns.find(b => b.innerText && b.innerText.trim() === 'Export');
-      if (target) target.click();
-    });
+    await page.waitForTimeout(2000);
+    
+    // Step 1: Open the drawer using a native click on the VISIBLE button.
+    const openDrawerBtn = page.locator('button:has-text("Export"):visible, div[role="button"]:has-text("Export"):visible').last();
+    await openDrawerBtn.click({ force: true, timeout: 15000 });
 
     console.log("Waiting for catalog download drawer...");
     await page.waitForTimeout(3000); 
 
     console.log("Selecting Excel for catalog...");
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const target = btns.find(b => b.textContent && b.textContent.includes('Excel'));
-      if (target) target.click();
-    });
+    // Step 2: Click the 'Excel' text natively
+    await page.locator('text="Excel"').last().click({ force: true, timeout: 15000 });
 
     await page.waitForTimeout(2500);
 
     console.log("Clicking final Export/Download button...");
+    
+    // Step 3: Click the big blue Export button at the bottom of the drawer natively.
+    // By combining :visible and .last(), it guarantees we hit the blue button in the drawer.
+    const finalExportBtn = page.locator('button:has-text("Export"):visible').last();
+
     const [download2] = await Promise.all([
       page.waitForEvent('download', { timeout: 60000 }),
-      page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        
-        // Find the last button that says "Export" AND is actually visible on the screen
-        const target = btns.reverse().find(b => {
-            const text = b.textContent ? b.textContent.trim() : '';
-            const isVisible = b.offsetWidth > 0 && b.offsetHeight > 0; // The magic fix
-            
-            return (text === 'Export' || text === 'Download') && isVisible;
-        });
-        
-        if (target) {
-            target.click();
-        }
-      })
+      finalExportBtn.click({ force: true, timeout: 15000 })
     ]);
 
     const downloadPath2 = path.join(__dirname, 'latest_yoco_catalog.xlsx');
