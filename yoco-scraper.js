@@ -127,7 +127,6 @@ async function run() {
 
     console.log("Opening catalog export menu...");
     await page.waitForTimeout(1500);
-    // RESTORED: Your working evaluate script for step 1
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button, div'));
       const target = btns.find(b => b.innerText && b.innerText.trim() === 'Export');
@@ -138,14 +137,12 @@ async function run() {
     await page.waitForTimeout(3000); 
 
     console.log("Selecting Excel for catalog...");
-    // RESTORED: Your working evaluate script for step 2
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button'));
       const target = btns.find(b => b.textContent && b.textContent.includes('Excel'));
       if (target) target.click();
     });
 
-    // 🛑 CRITICAL FIX: Give the app time to process the "Excel" selection
     await page.waitForTimeout(2500);
 
     console.log("Clicking final Export/Download button...");
@@ -153,12 +150,18 @@ async function run() {
       page.waitForEvent('download', { timeout: 60000 }),
       page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
-        // Fixed: Look for the newly added button, checking for BOTH "Export" or "Download" text
+        
+        // Find the last button that says "Export" AND is actually visible on the screen
         const target = btns.reverse().find(b => {
             const text = b.textContent ? b.textContent.trim() : '';
-            return text === 'Export' || text === 'Download';
+            const isVisible = b.offsetWidth > 0 && b.offsetHeight > 0; // The magic fix
+            
+            return (text === 'Export' || text === 'Download') && isVisible;
         });
-        if (target) target.click();
+        
+        if (target) {
+            target.click();
+        }
       })
     ]);
 
