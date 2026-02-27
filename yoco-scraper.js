@@ -135,10 +135,45 @@ async function run() {
         })
     ]);
 
-    const downloadPath = path.join(__dirname, 'latest_yoco_products.xlsx');
+    const downloadPath = path.join(__dirname, 'latest_yoco_sales.xlsx');
     await download.saveAs(downloadPath);
 
-    console.log(`✅ Successfully downloaded YOCO products XLSX to: ${downloadPath}`);
+    console.log(`✅ Successfully downloaded YOCO sales XLSX to: ${downloadPath}`);
+
+    // --- SECOND EXPORT: PRODUCTS CATALOG ---
+    console.log("Navigating to products catalog...");
+    await page.goto('https://app.yoco.com/manage/products/home', { waitUntil: 'domcontentloaded' });
+
+    // Click Export button
+    console.log("Opening catalog export menu...");
+    const exportBtn = page.locator('button:has-text("Export")').first();
+    await exportBtn.waitFor({ state: 'visible', timeout: 30000 });
+    await exportBtn.click({ timeout: 15000, force: true });
+
+    // Wait for the drawer
+    console.log("Waiting for catalog download drawer...");
+    await page.waitForFunction(() => {
+      const bodyText = document.body?.innerText || "";
+      return bodyText.includes("Excel");
+    }, null, { timeout: 60000 });
+
+    console.log("Selecting Excel for catalog...");
+    await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
+      await page.locator('text=Excel').first().click({ timeout: 15000 });
+    });
+
+    console.log("Clicking Download for catalog...");
+    const [download2] = await Promise.all([
+      page.waitForEvent('download', { timeout: 60000 }),
+      page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
+        .catch(async () => {
+          await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
+        })
+    ]);
+
+    const downloadPath2 = path.join(__dirname, 'latest_yoco_catalog.xlsx');
+    await download2.saveAs(downloadPath2);
+    console.log(`✅ Successfully downloaded YOCO catalog XLSX to: ${downloadPath2}`);
 
   } catch (error) {
     console.error("❌ Synchronization failed. Please check credentials or try again later.");
