@@ -1,5 +1,137 @@
-const { chromium } = require('playwright');
-const path = require('path');
+const { chromium } = require("playwright");
+const path = require("path");
+const fs = require("fs");
+
+const AUTH_DIR = path.join(__dirname, ".playwright");
+const AUTH_STATE_PATH = path.join(AUTH_DIR, "auth_state.json");
+
+function ensureDir(p) {
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+
+async function dismissCookies(page) {
+  const cookieBtn = page.getByRole("button", { name: /I understand/i });
+  if (await cookieBtn.isVisible().catch(() => false)) {
+    await cookieBtn.click().catch(() => {});
+  }
+}
+
+async function isLoggedIn(page) {
+  // If we can load a known authenticated page without being redirected to /login, we’re good.
+  await page.goto("https://app.yoco.com/reports/products/home?period=today", {
+    waitUntil: "domcontentloaded",
+  });
+
+  return !page.url().includes("/login");
+}
+
+async function doLogin(page, email, password) {
+  await page.goto("https://app.yoco.com/login/existing", {
+    waitUntil: "domcontentloaded",
+  });
+
+  await dismissCookies(page);
+
+  const emailInput = page.locator('input[placeholder="Enter your email address"]');
+  const passInput = page.locator('input[placeholder="Enter your password"]');
+
+  await emailInput.waitFor({ state: "visible", timeout: 60000 });
+  await passInput.waitFor({ state: "visible", timeout: 60000 });
+
+  await emailInput.fill(email);
+  await passInput.fill(password);
+
+  // Prefer a straightforward submit: press Enter on password
+  await passInput.press("Enter").catch(() => {});
+
+  // Wait for redirect away from /login
+  await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 60000 });
+}
+
+async function exportSalesReport(page) {
+  console.log("[Export 1/2] Sales products report (today)");
+
+  // We should already be on the report page from isLoggedIn() check; still ensure.
+  if (!page.url().includes("/reports/products/home")) {
+    await page.goto("https://app.yoco.com/reports/products/home?period=today", {
+      waitUntil: "domcontentloaded",
+    });
+  }
+
+  await dismissCookies(page);
+
+  // Ensure the page is ready (avoid generic sleeps)
+  await page.getByText("Today", { exact: true }).waitFor({ state: "visible", timeout: 60000 });
+
+  // Try to ensure Today is selected (click is harmless if already selected)
+  await page.getByText("Today", { exact: true }).click().catch(() => {});
+
+  // Open download menu (your existing icon approach, but with deterministic follow-up waits)
+  const downloadIconBtn = page
+    .locator('button:has(div[style*="font-family: MaterialIcons"]):has-text("")')
+    .first();
+
+  if ((await downloadIconBtn.count()) === 0) {
+    throw new Error('Could not find the download icon button (). Selector may need adjustment.');
+  }
+
+  await downloadIconBtn.click({ timeout: 15000, force: true });
+
+  // Wait for drawer/menu content to appear by waiting for Excel button
+  const excelBtn = page.getByRole("button", { name: /Excel/i }).first();
+  await excelBtn.waitFor({ state: "visible", timeout: 60000 });
+  await excelBtn.click({ timeout: 15000 }).catch(async () => {
+    await page.locator("text=Excel").first().click({ timeout: 15000 });
+  });
+
+  const downloadBtn = page.getByRole("button", { name: /^Download$/i }).first();
+  await downloadBtn.waitFor({ state: "visible", timeout: 60000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 60000 }),
+    downloadBtn.click({ timeout: 30000 }),
+  ]);
+
+  const out = path.join(__dirname, "latest_yoco_sales.xlsx");
+  await download.saveAs(out);
+  console.log(`✅ Downloaded sales XLSX -> ${out}`);
+}
+
+async function exportCatalog(page) {
+  console.log("[Export 2/2] Products catalog");
+
+  await page.goto("https://app.yoco.com/manage/products/home", {
+    waitUntil: "domcontentloaded",
+  });
+
+  await dismissCookies(page);
+
+  // Wait for Export button to be visible (instead of sleeping)
+  const openDrawerBtn = page
+    .locator('button:has-text("Export"):visible, div[role="button"]:has-text("Export"):visible')
+    .last();
+
+  await openDrawerBtn.waitFor({ state: "visible", timeout: 60000 });
+  await openDrawerBtn.click({ force: true, timeout: 15000 });
+
+  // Wait for the drawer to show an Excel option, then select it
+  const excelOption = page.locator('text="Excel"').last();
+  await excelOption.waitFor({ state: "visible", timeout: 60000 });
+  await excelOption.click({ force: true, timeout: 15000 });
+
+  // The final Export button in the drawer (blue)
+  const finalExportBtn = page.locator('button:has-text("Export"):visible').last();
+  await finalExportBtn.waitFor({ state: "visible", timeout: 60000 });
+
+  const [download2] = await Promise.all([
+    page.waitForEvent("download", { timeout: 60000 }),
+    finalExportBtn.click({ force: true, timeout: 15000 }),
+  ]);
+
+  const out2 = path.join(__dirname, "latest_yoco_catalog.xlsx");
+  await download2.saveAs(out2);
+  console.log(`✅ Downloaded catalog XLSX -> ${out2}`);
+}
 
 async function run() {
   const email = process.env.YOCO_EMAIL;
@@ -11,157 +143,57 @@ async function run() {
   }
 
   console.log(`[Yoco Sync Engine] Starting sync for: ${email}`);
+  ensureDir(AUTH_DIR);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     acceptDownloads: true,
     viewport: { width: 1280, height: 720 },
+    // Reuse auth state if it exists
+    storageState: fs.existsSync(AUTH_STATE_PATH) ? AUTH_STATE_PATH : undefined,
+  });
+
+  context.setDefaultTimeout(60000);
+  context.setDefaultNavigationTimeout(60000);
+
+  // Block heavy resources (usually speeds things up a bit)
+  await context.route("**/*", (route) => {
+    const type = route.request().resourceType();
+    if (type === "image" || type === "font") return route.abort();
+    route.continue();
   });
 
   const page = await context.newPage();
 
   try {
-    // 1) Login
-    console.log("Navigating to login page...");
-    await page.goto('https://app.yoco.com/login/existing', { waitUntil: 'domcontentloaded' });
+    // Attempt authenticated navigation first
+    const loggedIn = await isLoggedIn(page);
 
-    const cookieBtn = page.getByRole('button', { name: /I understand/i });
-    if (await cookieBtn.isVisible().catch(() => false)) {
-      console.log("Dismissing cookie notice...");
-      await cookieBtn.click().catch(() => { });
+    if (!loggedIn) {
+      console.log("Not authenticated; performing login...");
+      await doLogin(page, email, password);
+
+      // Save state for next run
+      await context.storageState({ path: AUTH_STATE_PATH });
+
+      // Confirm we’re really in
+      if (!(await isLoggedIn(page))) {
+        throw new Error(`Login did not persist; still redirected to login. Current URL: ${page.url()}`);
+      }
+    } else {
+      console.log("Authenticated via stored session.");
     }
 
-    const emailInput = page.locator('input[placeholder="Enter your email address"]');
-    const passInput = page.locator('input[placeholder="Enter your password"]');
-
-    console.log("Waiting for login inputs...");
-    await emailInput.waitFor({ state: 'visible', timeout: 60000 });
-    await passInput.waitFor({ state: 'visible', timeout: 60000 });
-
-    console.log("Entering credentials...");
-    await emailInput.fill(email);
-    await passInput.fill(password);
-
-    const loginContainer = page.locator('[aria-disabled]:has-text("Log in")').first();
-    await loginContainer.waitFor({ state: 'visible', timeout: 60000 });
-
-    console.log("Submitting login...");
-    await page.waitForTimeout(500);
-
-    await loginContainer.click({ force: true, timeout: 10000 }).catch(() => { });
-
-    await page.waitForTimeout(1000);
-    if (page.url().includes('/login/')) {
-      console.log("Login click may not have submitted; pressing Enter in password field...");
-      await passInput.press('Enter').catch(() => { });
-    }
-
-    console.log("Waiting for login redirect...");
-    await page.waitForFunction(() => !location.pathname.includes('/login'), null, { timeout: 60000 })
-      .catch(() => { });
-
-    // 2) Navigate directly to products report (today)
-    console.log("Navigating to products report...");
-    await page.goto('https://app.yoco.com/reports/products/home?period=today', { waitUntil: 'domcontentloaded' });
-
-    if (page.url().includes('/login')) {
-      throw new Error(`Not authenticated (redirected back to login). Current URL: ${page.url()}`);
-    }
-
-    await page.waitForSelector('text=Today', { timeout: 60000 });
-
-    // 3) Ensure Today is selected
-    console.log('Ensuring "Today" filter...');
-    await page.getByText('Today', { exact: true }).click().catch(() => { });
-    await page.waitForTimeout(1200);
-
-    console.log("Opening download menu...");
-
-    const cookieBtn2 = page.getByRole('button', { name: /I understand/i });
-    if (await cookieBtn2.isVisible().catch(() => false)) {
-      console.log("Dismissing cookie notice (again)...");
-      await cookieBtn2.click().catch(() => { });
-    }
-
-    const downloadIconBtn = page.locator('button:has(div[style*="font-family: MaterialIcons"]):has-text("")').first();
-
-    if (await downloadIconBtn.count() === 0) {
-      throw new Error('Could not find the download icon button (). Selector may need adjustment.');
-    }
-
-    await downloadIconBtn.click({ timeout: 15000, force: true });
-
-    console.log("Waiting for download drawer...");
-    await page.waitForFunction(() => {
-      const bodyText = document.body?.innerText || "";
-      return (
-        bodyText.includes("Download product report") ||
-        bodyText.includes("Download preferences") ||
-        (bodyText.includes("Excel") && bodyText.includes("CSV"))
-      );
-    }, null, { timeout: 60000 });
-
-    // 5) Choose Excel, then click Download
-    console.log("Selecting Excel...");
-    await page.getByRole('button', { name: /Excel/i }).click({ timeout: 15000 }).catch(async () => {
-      await page.locator('text=Excel').first().click({ timeout: 15000 });
-    });
-
-    console.log("Clicking Download...");
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 60000 }),
-      page.getByRole('button', { name: /^Download$/i }).click({ timeout: 30000 })
-        .catch(async () => {
-          await page.locator('button:has-text("Download")').last().click({ timeout: 30000 });
-        })
-    ]);
-
-    const downloadPath = path.join(__dirname, 'latest_yoco_sales.xlsx');
-    await download.saveAs(downloadPath);
-
-    console.log(`✅ Successfully downloaded YOCO sales XLSX to: ${downloadPath}`);
-
-    // --- SECOND EXPORT: PRODUCTS CATALOG ---
-    console.log("Navigating to products catalog...");
-    await page.goto('https://app.yoco.com/manage/products/home', { waitUntil: 'domcontentloaded' });
-
-    console.log("Opening catalog export menu...");
-    await page.waitForTimeout(2000);
-    
-    // Step 1: Open the drawer using a native click on the VISIBLE button.
-    const openDrawerBtn = page.locator('button:has-text("Export"):visible, div[role="button"]:has-text("Export"):visible').last();
-    await openDrawerBtn.click({ force: true, timeout: 15000 });
-
-    console.log("Waiting for catalog download drawer...");
-    await page.waitForTimeout(3000); 
-
-    console.log("Selecting Excel for catalog...");
-    // Step 2: Click the 'Excel' text natively
-    await page.locator('text="Excel"').last().click({ force: true, timeout: 15000 });
-
-    await page.waitForTimeout(2500);
-
-    console.log("Clicking final Export/Download button...");
-    
-    // Step 3: Click the big blue Export button at the bottom of the drawer natively.
-    // By combining :visible and .last(), it guarantees we hit the blue button in the drawer.
-    const finalExportBtn = page.locator('button:has-text("Export"):visible').last();
-
-    const [download2] = await Promise.all([
-      page.waitForEvent('download', { timeout: 60000 }),
-      finalExportBtn.click({ force: true, timeout: 15000 })
-    ]);
-
-    const downloadPath2 = path.join(__dirname, 'latest_yoco_catalog.xlsx');
-    await download2.saveAs(downloadPath2);
-    console.log(`✅ Successfully downloaded YOCO catalog XLSX to: ${downloadPath2}`);
+    await exportSalesReport(page);
+    await exportCatalog(page);
 
   } catch (error) {
-    console.error("❌ Synchronization failed. Please check credentials or try again later.");
+    console.error("❌ Synchronization failed.");
     console.error(error);
+
     if (process.env.GITHUB_ACTIONS) {
-        await page.screenshot({ path: 'error_screenshot.png', fullPage: true }).catch(() => {});
-        console.log("Debug screenshot saved.");
+      await page.screenshot({ path: "error_screenshot.png", fullPage: true }).catch(() => {});
+      console.log("Debug screenshot saved: error_screenshot.png");
     }
     process.exit(1);
   } finally {
