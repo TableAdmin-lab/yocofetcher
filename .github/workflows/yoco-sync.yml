@@ -1,0 +1,64 @@
+name: YOCO Sales Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      yoco_email:
+        description: 'YOCO Login Email'
+        required: true
+        type: string
+      yoco_password:
+        description: 'YOCO Login Password'
+        required: true
+        type: string
+
+jobs:
+  fetch-report:
+    runs-on: ubuntu-latest
+    # Wait time eliminated by using official playwright container
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    permissions:
+      contents: write # Needed to commit the CSV back to the repo
+      
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node Modules Cache
+        id: cache-node-modules
+        uses: actions/cache@v4 # Upgraded to v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package.json') }}
+
+      - name: Install Dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: Run Yoco Sync Engine
+        env:
+          YOCO_EMAIL: ${{ github.event.inputs.yoco_email }}
+          YOCO_PASSWORD: ${{ github.event.inputs.yoco_password }}
+        run: npm start
+
+      - name: Commit and Push XLSX
+        run: |
+          git config --global --add safe.directory '*'
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add latest_yoco_sales.xlsx latest_yoco_catalog.xlsx
+          # Only commit if there are changes
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-sync: Latest YOCO Sales and Catalog Reports"
+          git push || echo "No changes to push"
+
+      # CRITICAL ADDITION: Save the screenshot if the scraper fails
+      - name: Upload Debug Screenshot
+        if: failure() # Only runs if a previous step failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-screenshot
+          path: error_screenshot.png
+          retention-days: 3 # Keeps your storage clean
